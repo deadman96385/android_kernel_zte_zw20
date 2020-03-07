@@ -880,3 +880,7 @@ config SND_SOC_MSM_HDMI_DBA_CODEC_RX
 	bool "HDMI DBA Audio Playback"
 	depends on MSM_DBA
 endmenu
+
+config ZTE_FEATURE_NXP9890_SMART_PA
+	bool "zte add NXP smart pa chip tfa9880"
+	depends on I2C

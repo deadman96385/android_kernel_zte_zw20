@@ -69,6 +69,7 @@ static int msm_route_ext_ec_ref;
 static bool is_custom_stereo_on;
 static bool is_ds2_on;
 static int msm_ec_ref_port_id;
+static bool is_bootsound_playing;
 
 #define WEIGHT_0_DB 0x4000
 /* all the FEs which can support channel mixer */
@@ -1676,6 +1677,12 @@ static int msm_routing_put_audio_mixer(struct snd_kcontrol *kcontrol,
 		snd_soc_dapm_mixer_update_power(widget->dapm, kcontrol, 1, update);
 	} else if (!ucontrol->value.integer.value[0] &&
 		  msm_pcm_routing_route_is_set(mc->reg, mc->shift) == true) {
+		if (is_bootsound_playing && strcmp(kcontrol->id.name,
+			  "QUAT_MI2S_RX Audio Mixer MultiMedia1") == 0) {
+			pr_info("%s: kcontrol->id.name = %s\n", __func__, kcontrol->id.name);
+			is_bootsound_playing = false;
+			return 1;
+		}
 		msm_pcm_routing_process_audio(mc->reg, mc->shift, 0);
 		snd_soc_dapm_mixer_update_power(widget->dapm, kcontrol, 0, update);
 	}
@@ -2245,6 +2252,33 @@ static int msm_routing_lsm_func_put(struct snd_kcontrol *kcontrol,
 		 mad_type);
 	return afe_port_set_mad_type(port_id, mad_type);
 }
+
+static const char *const bootsound_enable_text[] = {"Disable", "Enable"};
+
+static SOC_ENUM_SINGLE_EXT_DECL(bootsound_enable_set,
+				bootsound_enable_text);
+
+static int msm_routing_bootsound_enable_flag_get(
+					struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	ucontrol->value.integer.value[0] = is_bootsound_playing;
+	return 0;
+}
+
+static int msm_routing_bootsound_enable_flag_put(
+					struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	is_bootsound_playing = ucontrol->value.integer.value[0];
+	return 0;
+}
+
+static const struct snd_kcontrol_new bootsound_enable_set_controls[] = {
+	SOC_ENUM_EXT("BOOTSOUND_ENABLE SET", bootsound_enable_set,
+			msm_routing_bootsound_enable_flag_get,
+			msm_routing_bootsound_enable_flag_put),
+};
 
 static int msm_routing_slim_0_rx_aanc_mux_get(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
@@ -13916,6 +13950,9 @@ static int msm_routing_probe(struct snd_soc_platform *platform)
 
 	snd_soc_add_platform_controls(platform, msm_source_tracking_controls,
 				      ARRAY_SIZE(msm_source_tracking_controls));
+
+	snd_soc_add_platform_controls(platform, bootsound_enable_set_controls,
+				ARRAY_SIZE(bootsound_enable_set_controls));
 
 	snd_soc_add_platform_controls(platform, aptx_dec_license_controls,
 					ARRAY_SIZE(aptx_dec_license_controls));
