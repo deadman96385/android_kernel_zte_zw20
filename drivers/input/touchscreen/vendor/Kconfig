@@ -1,0 +1,21 @@
+#
+# Touchscreen driver configuration
+#
+config TOUCHSCREEN_VENDOR
+	bool "Vendor Touch Panel Driver"
+	help
+	  Say Y here if you have Vendor touch panel.
+
+	  If unsure, say N.
+
+	  To compile this dirver as a module, choose M here: the
+	  module will be called.
+
+if TOUCHSCREEN_VENDOR
+
+source "drivers/input/touchscreen/vendor/cypress/Kconfig"
+
+config TS_FIRMWARE
+	string "config board firmware folder"
+
+endif
