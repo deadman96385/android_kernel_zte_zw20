@@ -1,0 +1,7 @@
+source "drivers/soc/qcom/vendor/vlog/Kconfig"
+source "drivers/soc/qcom/vendor/logcat/Kconfig"
+source "drivers/soc/qcom/vendor/sdlog/Kconfig"
+source "drivers/soc/qcom/vendor/pmlog/Kconfig"
+source "drivers/soc/qcom/vendor/klog/Kconfig"
+source "drivers/soc/qcom/vendor/imem_info/Kconfig"
+source "drivers/soc/qcom/vendor/vcfg/Kconfig"
