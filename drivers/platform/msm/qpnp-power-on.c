@@ -29,7 +29,11 @@
 #include <linux/regulator/machine.h>
 #include <linux/regulator/of_regulator.h>
 #include <linux/qpnp/power-on.h>
+/*ZTE_PM add for powerkey print*/
 #include <linux/qpnp/qpnp-pbs.h>
+#include <linux/reboot.h>
+#include <../../include/soc/qcom/socinfo.h>
+
 #include <linux/qpnp-misc.h>
 
 #define CREATE_MASK(NUM_BITS, POS) \
@@ -231,9 +235,93 @@ struct qpnp_pon {
 	bool			kpdpwr_dbc_enable;
 	bool			support_twm_config;
 	ktime_t			kpdpwr_last_release_time;
+	/*zte_pm add*/
+	struct timer_list timer;
+	struct work_struct pwrkey_poweroff_work;
+	struct work_struct pwrkey_release_work;
+	struct delayed_work check_pwrkey_work;
 	struct notifier_block	pon_nb;
 };
+/*zte_pm add*/
+#define POWER_KEY_CHECK_MS 1000
+#ifndef ZTE_HOMEPHONE_ENABLE
+static void pwrkey_timer(unsigned long data)
+{
+	struct qpnp_pon *pon = (struct qpnp_pon *)data;
 
+	schedule_work(&pon->pwrkey_poweroff_work);
+}
+#endif
+static void pwrkey_poweroff(struct work_struct *work)
+{
+#if defined(ZTE_HOMEPHONE_ENABLE)
+	pr_emerg("power key long pressed, trigger reboot\n");
+	/*kernel_restart("LONGPRESS");*/
+#else
+	pr_info("%s: power key long pressed, trigger reboot\n", __func__);
+	kernel_restart("LONGPRESS");
+#endif
+}
+
+static void pwrkey_release(struct work_struct *work)
+{
+	struct qpnp_pon *pon = container_of(work,
+				struct qpnp_pon, pwrkey_release_work);
+
+	cancel_delayed_work_sync(&pon->check_pwrkey_work);
+}
+
+static void check_pwrkey(struct work_struct *work)
+{
+	u8 pon_rt_sts = 0;
+	int rc = 0;
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct qpnp_pon *pon = container_of(dwork,
+				struct qpnp_pon, check_pwrkey_work);
+
+	rc = spmi_ext_register_readl(pon->spmi->ctrl, pon->spmi->sid,
+			QPNP_PON_RT_STS(pon), &pon_rt_sts, 1);
+	if (rc) {
+		pr_err("%s, Unable to read PON RT status\n", __func__);
+#if defined(ZTE_HOMEPHONE_ENABLE)
+		pon->resetkey_count = 0;
+#else
+		del_timer(&pon->timer);
+#endif
+		return;
+	}
+	if (pon_rt_sts & QPNP_PON_KPDPWR_N_SET) {
+		schedule_delayed_work(&pon->check_pwrkey_work,
+				  round_jiffies_relative(msecs_to_jiffies
+							 (POWER_KEY_CHECK_MS)));
+		pr_emerg("%s, power key not released, check it again\n", __func__);
+#if defined(ZTE_HOMEPHONE_ENABLE)
+		pon->resetkey_count = pon->resetkey_count + 1;
+		pr_emerg("power key not released, check it again(%d)\n", pon->resetkey_count);
+		if (pon->resetkey_count == 2) {
+		    input_report_key(pon->pon_input, KEY_F4, 1);
+		    input_sync(pon->pon_input);
+		    input_report_key(pon->pon_input, KEY_F4, 0);
+		    input_sync(pon->pon_input);
+			/*report rst key*/
+			pr_emerg("report [upgrade] key\n");
+		} else if (pon->resetkey_count == 10) {
+			/*direct reset*/
+			pr_emerg("report [direct-reset] key\n");
+			/*kernel_restart("RST_KEY_LONGPRESS");*/
+		}
+#endif
+	} else {
+#if defined(ZTE_HOMEPHONE_ENABLE)
+		pon->resetkey_count = 0;
+		pr_emerg("power key not pressed, delete timer of power key\n");
+#else
+		del_timer(&pon->timer);
+		pr_emerg("%s, power key not pressed, delete timer of power key\n", __func__);
+#endif
+	}
+}
+/*zte_pm add end*/
 static struct qpnp_pon *sys_reset_dev;
 static DEFINE_SPINLOCK(spon_list_slock);
 static LIST_HEAD(spon_dev_list);
@@ -888,20 +976,56 @@ qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 	return 0;
 }
 
+/* zte_pm ============== pwrkey crash ========================== */
+static int pwrkey_crash = 0;
+module_param(pwrkey_crash, int, 0644);
+extern int boot_mode_is_charger(void);
+/* zte_pm */
 static irqreturn_t qpnp_kpdpwr_irq(int irq, void *_pon)
 {
 	int rc;
 	struct qpnp_pon *pon = _pon;
 
+	/* zte_pm */
+	u8 pon_rt_sts = 0;
+	/* zte_pm */
 	rc = qpnp_pon_input_dispatch(pon, PON_KPDPWR);
 	if (rc)
 		dev_err(&pon->spmi->dev, "Unable to send input event\n");
-
+	/* zte_pm */
+	rc = spmi_ext_register_readl(pon->spmi->ctrl, pon->spmi->sid,
+				QPNP_PON_RT_STS(pon), &pon_rt_sts, 1);
+	if (pon_rt_sts & QPNP_PON_KPDPWR_N_SET) {
+		if (socinfo_get_ftm_flag() == 1 || socinfo_get_charger_flag() == 1) {
+			pon->timer.expires = jiffies + 3 * HZ;
+			pr_info("%s: FTM mode,start 3s timer for reboot\n", __func__);
+		} else {
+#ifdef CONFIG_ZTE_PWRKEY_16S_RESET
+			pon->timer.expires = jiffies + 16 * HZ;
+			pr_info("%s: Normal mode,start 16s timer for reboot\n", __func__);
+#else
+			pon->timer.expires = jiffies + 10 * HZ;
+			pr_info("%s: Normal mode,start 10s timer for reboot\n", __func__);
+#endif
+		}
+		mod_timer(&pon->timer, pon->timer.expires);
+		schedule_delayed_work(&pon->check_pwrkey_work,
+			round_jiffies_relative(msecs_to_jiffies(POWER_KEY_CHECK_MS)));
+		pr_info("power key pressed\n");
+	} else {
+		del_timer(&pon->timer);
+		schedule_work(&pon->pwrkey_release_work);
+		pr_info("power key released\n");
+	}
+	/* zte_pm */
 	return IRQ_HANDLED;
 }
 
 static irqreturn_t qpnp_kpdpwr_bark_irq(int irq, void *_pon)
 {
+	/* zte_pm */
+	pr_info("power key bark trigger\n");
+	/* zte_pm */
 	return IRQ_HANDLED;
 }
 
@@ -925,7 +1049,9 @@ static irqreturn_t qpnp_cblpwr_irq(int irq, void *_pon)
 {
 	int rc;
 	struct qpnp_pon *pon = _pon;
-
+	/* zte_pm */
+	pr_info("%s qpnp_cblpwr_irq  trigger\n", __func__);
+	/* zte_pm */
 	rc = qpnp_pon_input_dispatch(pon, PON_CBLPWR);
 	if (rc)
 		dev_err(&pon->spmi->dev, "Unable to send input event\n");
@@ -1048,7 +1174,9 @@ static irqreturn_t qpnp_resin_bark_irq(int irq, void *_pon)
 
 	/* disable the bark interrupt */
 	disable_irq_nosync(irq);
-
+	/* zte_pm */
+	pr_info("ZTE_PM resin_bark\n");
+	/* zte_pm */
 	cfg = qpnp_get_cfg(pon, PON_RESIN);
 	if (!cfg) {
 		dev_err(&pon->spmi->dev, "Invalid config pointer\n");
@@ -2281,7 +2409,16 @@ static int qpnp_pon_probe(struct spmi_device *spmi)
 	dev_set_drvdata(&spmi->dev, pon);
 
 	INIT_DELAYED_WORK(&pon->bark_work, bark_work_func);
-
+	/* zte_pm */
+#ifndef ZTE_HOMEPHONE_ENABLE
+	init_timer(&pon->timer);
+	pon->timer.data = (unsigned long)pon;
+	pon->timer.function = pwrkey_timer;
+#endif
+	INIT_WORK(&pon->pwrkey_poweroff_work, pwrkey_poweroff);
+	INIT_WORK(&pon->pwrkey_release_work, pwrkey_release);
+	INIT_DELAYED_WORK(&pon->check_pwrkey_work, check_pwrkey);
+	/* zte_pm */
 	/* register the PON configurations */
 	rc = qpnp_pon_config_init(pon);
 	if (rc) {

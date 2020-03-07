@@ -15,7 +15,9 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 
-int msm_show_resume_irq_mask;
+/* change by ZTE show vdd_min and sleep clk ++++ */
+int msm_show_resume_irq_mask = 1;
+/* change by ZTE show vdd_min and sleep clk end */
 
 module_param_named(
 	debug_mask, msm_show_resume_irq_mask, int, S_IRUGO | S_IWUSR | S_IWGRP

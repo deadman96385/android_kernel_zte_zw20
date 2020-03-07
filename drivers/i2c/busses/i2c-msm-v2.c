@@ -2234,7 +2234,6 @@ static int i2c_msm_pm_xfer_start(struct i2c_msm_ctrl *ctrl)
 	int ret;
 	mutex_lock(&ctrl->xfer.mtx);
 
-	i2c_msm_pm_pinctrl_state(ctrl, true);
 	pm_runtime_get_sync(ctrl->dev);
 	/*
 	 * if runtime PM callback was not invoked (when both runtime-pm
@@ -2245,6 +2244,11 @@ static int i2c_msm_pm_xfer_start(struct i2c_msm_ctrl *ctrl)
 		i2c_msm_pm_resume(ctrl->dev);
 	}
 
+	ret = i2c_msm_pm_clk_prepare(ctrl);
+	if (ret) {
+		mutex_unlock(&ctrl->xfer.mtx);
+		return ret;
+	}
 	ret = i2c_msm_pm_clk_enable(ctrl);
 	if (ret) {
 		mutex_unlock(&ctrl->xfer.mtx);
@@ -2273,13 +2277,14 @@ static void i2c_msm_pm_xfer_end(struct i2c_msm_ctrl *ctrl)
 		i2c_msm_dma_free_channels(ctrl);
 
 	i2c_msm_pm_clk_disable(ctrl);
+	i2c_msm_pm_clk_unprepare(ctrl);
 
 	if (!pm_runtime_enabled(ctrl->dev))
 		i2c_msm_pm_suspend(ctrl->dev);
 
 	pm_runtime_mark_last_busy(ctrl->dev);
 	pm_runtime_put_autosuspend(ctrl->dev);
-	i2c_msm_pm_pinctrl_state(ctrl, false);
+
 	mutex_unlock(&ctrl->xfer.mtx);
 }
 
@@ -2717,7 +2722,7 @@ static void i2c_msm_pm_suspend(struct device *dev)
 		return;
 	}
 	i2c_msm_dbg(ctrl, MSM_DBG, "suspending...");
-	i2c_msm_pm_clk_unprepare(ctrl);
+	i2c_msm_pm_pinctrl_state(ctrl, false);
 	i2c_msm_clk_path_unvote(ctrl);
 
 	/*
@@ -2744,7 +2749,7 @@ static int i2c_msm_pm_resume(struct device *dev)
 	i2c_msm_dbg(ctrl, MSM_DBG, "resuming...");
 
 	i2c_msm_clk_path_vote(ctrl);
-	i2c_msm_pm_clk_prepare(ctrl);
+	i2c_msm_pm_pinctrl_state(ctrl, true);
 	ctrl->pwr_state = I2C_MSM_PM_RT_ACTIVE;
 	return 0;
 }
