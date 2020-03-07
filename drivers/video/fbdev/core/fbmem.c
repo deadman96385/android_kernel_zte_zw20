@@ -1054,12 +1054,14 @@ EXPORT_SYMBOL(fb_set_var);
 
 int
 fb_blank(struct fb_info *info, int blank)
-{	
+{
 	struct fb_event event;
 	int ret = -EINVAL, early_ret;
 
  	if (blank > FB_BLANK_POWERDOWN)
  		blank = FB_BLANK_POWERDOWN;
+
+	pr_info("%s: mdss blank=%d start\n", __func__, blank);
 
 	event.info = info;
 	event.data = &blank;
@@ -1079,6 +1081,8 @@ fb_blank(struct fb_info *info, int blank)
 		if (!early_ret)
 			fb_notifier_call_chain(FB_R_EARLY_EVENT_BLANK, &event);
 	}
+
+	pr_info("%s: mdss blank=%d end\n", __func__, blank);
 
  	return ret;
 }

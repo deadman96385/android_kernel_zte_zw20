@@ -28,6 +28,9 @@
 #ifdef TARGET_HW_MDSS_HDMI
 #include "mdss_dba_utils.h"
 #endif
+#ifdef CONFIG_ZTE_LCD_COMMON_FUNCTION
+#include "zte_lcd_common.h"
+#endif
 #define DT_CMD_HDR 6
 #define MIN_REFRESH_RATE 48
 #define DEFAULT_MDP_TRANSFER_TIME 14000
@@ -216,10 +219,17 @@ static struct dsi_cmd_desc backlight_cmd = {
 	led_pwm1
 };
 
+static char led_reg_53[2] = {0x53, 0x20};
+static struct dsi_cmd_desc backlight_cmd_53 = {
+	{DTYPE_DCS_WRITE1, 1, 0, 0, 1, sizeof(led_reg_53)},
+	led_reg_53
+};
+
 static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 {
 	struct dcs_cmd_req cmdreq;
 	struct mdss_panel_info *pinfo;
+	static u32 bldcs_level_last = 0;
 
 	pinfo = &(ctrl->panel_data.panel_info);
 	if (pinfo->dcs_cmd_by_left) {
@@ -227,7 +237,23 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 			return;
 	}
 
-	pr_debug("%s: level=%d\n", __func__, level);
+	pr_info("%s: level=%d\n", __func__, level);
+
+	if (level == 0) {
+		led_reg_53[1] = 0x20;
+	} else if (level != 0 && bldcs_level_last != 0 && led_reg_53[1] != 0x28) {
+		memset(&cmdreq, 0, sizeof(cmdreq));
+		led_reg_53[1] = 0x28;
+		cmdreq.cmds = &backlight_cmd_53;
+		cmdreq.cmds_cnt = 1;
+		cmdreq.flags = CMD_REQ_COMMIT;
+		cmdreq.rlen = 0;
+		cmdreq.cb = NULL;
+		pr_info("%s: set cmd53 = 0x%x level=%d\n", __func__, led_reg_53[1], level);
+		mdss_dsi_cmdlist_put(ctrl, &cmdreq);
+	}
+
+	bldcs_level_last = level;
 
 	led_pwm1[1] = (unsigned char)level;
 
@@ -486,7 +512,8 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			usleep_range(100, 110);
 			gpio_free(ctrl_pdata->disp_en_gpio);
 		}
-		gpio_set_value((ctrl_pdata->rst_gpio), 0);
+		pr_info("%s: skip panel reset pull down\n", __func__);
+		/*gpio_set_value((ctrl_pdata->rst_gpio), 0);*/
 		gpio_free(ctrl_pdata->rst_gpio);
 		if (gpio_is_valid(ctrl_pdata->mode_gpio))
 			gpio_free(ctrl_pdata->mode_gpio);
@@ -2884,5 +2911,8 @@ int mdss_dsi_panel_init(struct device_node *node,
 			mdss_dsi_panel_apply_display_setting;
 	ctrl_pdata->switch_mode = mdss_dsi_panel_switch_mode;
 	ctrl_pdata->panel_data.get_idle = mdss_dsi_panel_get_idle_mode;
+#ifdef CONFIG_ZTE_LCD_COMMON_FUNCTION
+	zte_lcd_common_func(ctrl_pdata, node);
+#endif
 	return 0;
 }

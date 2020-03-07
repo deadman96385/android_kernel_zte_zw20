@@ -261,8 +261,15 @@ int msm_dss_enable_vreg(struct dss_vreg *in_vreg, int num_vreg, int enable)
 {
 	int i = 0, rc = 0;
 	bool need_sleep;
+	static int bklt_reg_enabled = 0;
 	if (enable) {
 		for (i = 0; i < num_vreg; i++) {
+			if (strnstr(in_vreg[i].vreg_name, "bklt", 32) != NULL && bklt_reg_enabled != 0) {
+				pr_info("%s: reg = %s enable=%d bklt_reg_enabled=%d skip\n",
+					__func__, in_vreg[i].vreg_name, enable, bklt_reg_enabled);
+				continue;
+			}
+
 			rc = PTR_RET(in_vreg[i].vreg);
 			if (rc) {
 				DEV_ERR("%pS->%s: %s regulator error. rc=%d\n",
@@ -292,9 +299,22 @@ int msm_dss_enable_vreg(struct dss_vreg *in_vreg, int num_vreg, int enable)
 					in_vreg[i].vreg_name);
 				goto disable_vreg;
 			}
+
+			if (strnstr(in_vreg[i].vreg_name, "bklt", 32) != NULL) {
+				bklt_reg_enabled = 1;
+				pr_info("%s: reg = %s enable=%d bklt_reg_enabled=%d\n",
+					__func__, in_vreg[i].vreg_name, enable, bklt_reg_enabled);
+				continue;
+			}
 		}
 	} else {
 		for (i = num_vreg-1; i >= 0; i--) {
+			if (strnstr(in_vreg[i].vreg_name, "bklt", 32) != NULL) {
+				pr_info("%s: reg = %s enable=%d skip\n",
+						__func__, in_vreg[i].vreg_name, enable);
+				continue;
+			}
+
 			if (in_vreg[i].pre_off_sleep)
 				usleep_range(in_vreg[i].pre_off_sleep * 1000,
 					in_vreg[i].pre_off_sleep * 1000);

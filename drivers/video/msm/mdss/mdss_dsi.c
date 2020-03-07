@@ -34,6 +34,10 @@
 #include "mdss_dsi_phy.h"
 #include "mdss_dba_utils.h"
 
+#ifdef CONFIG_ZTE_LCD_COMMON_FUNCTION
+#include "zte_lcd_common.h"
+extern struct mdss_dsi_ctrl_pdata *g_zte_ctrl_pdata;
+#endif
 #define XO_CLK_RATE	19200000
 #define CMDLINE_DSI_CTL_NUM_STRING_LEN 2
 
@@ -294,7 +298,10 @@ static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 
 	if (mdss_dsi_pinctrl_set_state(ctrl_pdata, false))
 		pr_debug("reset disable: pinctrl not enabled\n");
-
+	#if defined(CONFIG_ZTE_LCD_COMMON_FUNCTION) && defined(CONFIG_ZTE_LCD_GPIO_CTRL_POWER)
+	/*add by yujianhua for tp gesture,don't shutdown vsp vsn power*/
+	g_zte_ctrl_pdata->zte_lcd_ctrl->gpio_enable_lcd_power(pdata, 0);
+	#endif
 	ret = msm_dss_enable_vreg(
 		ctrl_pdata->panel_power_data.vreg_config,
 		ctrl_pdata->panel_power_data.num_vreg, 0);
@@ -302,6 +309,7 @@ static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 		pr_err("%s: failed to disable vregs for %s\n",
 			__func__, __mdss_dsi_pm_name(DSI_PANEL_PM));
 
+	pr_info("[MSM_LCD]%s: power off\n", __func__);
 end:
 	return ret;
 }
@@ -327,6 +335,10 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 		return ret;
 	}
 
+#if defined(CONFIG_ZTE_LCD_COMMON_FUNCTION) && defined(CONFIG_ZTE_LCD_GPIO_CTRL_POWER)
+	g_zte_ctrl_pdata->zte_lcd_ctrl->gpio_enable_lcd_power(pdata, 1);
+#endif
+
 	/*
 	 * If continuous splash screen feature is enabled, then we need to
 	 * request all the GPIOs that have already been configured in the
@@ -344,6 +356,7 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 					__func__, ret);
 	}
 
+	pr_info("[MSM_LCD]%s: power on\n", __func__);
 	return ret;
 }
 
@@ -3052,7 +3065,7 @@ error_link_clk_deinit:
 	return rc;
 }
 
-static int mdss_dsi_set_clk_rates(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
+int mdss_dsi_set_clk_rates(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
 	int rc = 0;
 
@@ -4090,6 +4103,9 @@ static int mdss_dsi_parse_gpio_params(struct platform_device *ctrl_pdev,
 	 * If disp_en_gpio has been set previously (disp_en_gpio > 0)
 	 *  while parsing the panel node, then do not override it
 	 */
+#ifdef CONFIG_ZTE_LCD_GPIO_CTRL_POWER
+	zte_gpio_ctrl_lcd_power_init(ctrl_pdev, ctrl_pdata);
+#endif
 	if (ctrl_pdata->disp_en_gpio <= 0) {
 		ctrl_pdata->disp_en_gpio = of_get_named_gpio(
 			ctrl_pdev->dev.of_node,
