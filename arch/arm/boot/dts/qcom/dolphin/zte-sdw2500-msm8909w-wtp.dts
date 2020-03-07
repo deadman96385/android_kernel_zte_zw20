@@ -1,0 +1,158 @@
+/*
+ * Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+#include "../sdw2500-msm8909w-wtp.dts"
+#include "qualcomm_base_diff.dtsi"
+#include "dsi-panel-zte-tianma-rm67162-tianma-300p-cmd.dtsi"
+#include "dsi-panel-zte-tianma-rm69091-tianma-300p-cmd.dtsi"
+
+&mdss_dsi0 {
+	qcom,dsi-pref-prim-pan = <&dsi_tianma_rm67162_300p_cmd>;
+	pinctrl-names = "mdss_default", "mdss_sleep";
+	pinctrl-0 = <&mdss_dsi_active &mdss_te_active>;
+	pinctrl-1 = <&mdss_dsi_suspend &mdss_te_suspend>;
+
+	qcom,platform-te-gpio = <&msm_gpio 24 0>;
+	qcom,platform-reset-gpio = <&msm_gpio 25 0>;
+	qcom,platform-bklight-en-gpio = <&msm_gpio 37 0>;
+};
+
+&msm_gpio {
+	pmx_mdss {
+		mdss_dsi_active: mdss_dsi_active {
+			mux {
+				pins = "gpio37", "gpio59";
+			};
+			config {
+				pins = "gpio37", "gpio59";
+			};
+		};
+		mdss_dsi_suspend: mdss_dsi_suspend {
+			mux {
+				pins = "gpio37", "gpio59";
+			};
+			config {
+				pins = "gpio37", "gpio59";
+			};
+		};
+	};
+};
+
+&cont_splash_mem {
+	reg = <0x0 0x83000000 0x0 0x300000>;
+};
+
+&mdss_spi {
+	status = "disabled";
+};
+
+&pm660_charger {
+	io-channels = <&pm660_rradc 8>,
+			  <&pm660_rradc 10>,
+			  <&pm660_rradc 3>,
+			  <&pm660_rradc 4>;
+	io-channel-names = "charger_temp",
+			   "charger_temp_max",
+			   "usbin_i",
+			   "usbin_v";
+	qcom,micro-usb;
+	qcom,fv-max-uv = <4400000>;
+	qcom,fcc-max-ua = <425000>;
+	qcom,usb-icl-ua = <1000000>;
+	qcom,chg-term-ma = <50>;
+	qcom,hvdcp-disable;
+	qcom,thermal-mitigation
+		= <425000 375000 325000 275000 225000 175000 0>;
+	qcom,charge-current-comp-ma = <12>;/* fcc-12*25 = 125mA*/
+	qcom,float-voltage-comp-cool = <0>;	/* 4400mv */
+	qcom,float-voltage-comp-warm = <40>;	/* 4100mv */
+	/* qcom,auto-recharge-soc; */
+	qcom,sw-jeita-enable;
+	qcom,jeita-fcc-ranges
+		= <0 100 125000
+		101 450 425000
+		451 500 275000>;
+	qcom,jeita-fv-ranges
+		= <0 100 4400000
+		101 450 4400000
+		451 500 4100000>;
+};
+
+&pm660_fg {
+	qcom,fg-jeita-thresholds = <0 10 45 50>;
+	qcom,battery-thermal-coefficients = [c7 50 ff];
+	qcom,fg-recharge-voltage = <4300>;
+	qcom,fg-cool-recharge-voltage = <4200>;
+	qcom,fg-warm-recharge-voltage = <3950>;
+	qcom,hold-soc-while-full;
+	qcom,fg-cutoff-voltage = <3200>;
+	qcom,fg-empty-voltage = <3100>;
+	qcom,fg-force-load-profile;
+	qcom,fg-chg-term-current = <50>;
+	qcom,fg-sys-term-current = <(-50)>;
+};
+
+/ {
+	/delete-node/ qcom,battery-data;
+	mtp_batterydata: qcom,battery-data {
+		qcom,batt-id-range-pct = <15>;
+		#include "ZTE_ZW20_500mAH_PMW3100.dtsi"
+	};
+
+	charger_policy_service {
+		compatible = "zte,charger-policy-service";
+		status="okay";
+		policy,enable = <1>;
+		policy,retry-times = <20>;
+		policy,expired-mode-enable = <0>;
+		policy,low-temp-enable = <0>;
+		policy,have-power-path = <1>;
+		policy,timeout-seconds = <64800>;/* 18 hours */
+		policy,expired-max-capacity = <60>;
+		policy,expired-min-capacity = <40>;
+		policy,demo-max-capacity = <35>;
+		policy,demo-min-capacity = <30>;
+		policy,no-powerpath-delta-capacity = <10>;
+		policy,battery-phy-name = "battery";
+		policy,interface-phy-name = "battery";
+		policy,cas-phy-name = "cas";
+	};
+};
+
+&dsi_tianma_rm67162_300p_cmd {
+	qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_dcs";
+	qcom,panel-supply-entries = <&dsi_pm660_panel_pwr_supply>;
+};
+
+&dsi_tianma_rm69091_300p_cmd {
+	qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_dcs";
+	qcom,panel-supply-entries = <&dsi_pm660_panel_pwr_supply>;
+};
+
+&i2c_6 {
+	status = "okay";
+	tfa9890@34 {
+		compatible = "nxp,tfa98xx";
+		reg = <0x34>;
+		reset-gpio = <&msm_gpio 9 0x0>;
+	};
+};
+
+&modem_adsp_mem {
+	reg = <0x0 0x88000000 0x0 0x04b00000>;
+};
+
+&peripheral_mem {
+	reg = <0x0 0x8cb00000 0x0 0x0600000>;
+};
+

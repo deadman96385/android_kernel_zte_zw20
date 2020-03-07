@@ -1,0 +1,108 @@
+/*
+ * this file is ued to change qualcomm dtsi which can't be changed by overlay
+ */
+#include "touchscreen_dolphin.dtsi"
+#include "../zte-msm8909-vendor-imem.dtsi"
+
+/ {
+	aliases {
+		i2c6 = &i2c_6;
+	};
+};
+
+&soc {
+	i2c_6: i2c@78ba000 { /* BLSP1 QUP6 */
+		compatible = "qcom,i2c-msm-v2";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg-names = "qup_phys_addr";
+		reg = <0x78ba000 0x1000>;
+		interrupt-names = "qup_irq";
+		interrupts = <0 100 0>;
+		clocks = <&clock_gcc clk_gcc_blsp1_ahb_clk>,
+			 <&clock_gcc clk_gcc_blsp1_qup6_i2c_apps_clk>;
+		clock-names = "iface_clk", "core_clk";
+		qcom,clk-freq-out = <100000>;
+		qcom,clk-freq-in  = <19200000>;
+		pinctrl-names = "i2c_active", "i2c_sleep";
+		pinctrl-0 = <&i2c_6_active>;
+		pinctrl-1 = <&i2c_6_sleep>;
+		qcom,noise-rjct-scl = <0>;
+		qcom,noise-rjct-sda = <0>;
+		dmas = <&dma_blsp1 14 64 0x20000020 0x20>,
+		<&dma_blsp1 15 32 0x20000020 0x20>;
+		dma-names = "tx", "rx";
+		qcom,master-id = <86>;
+	};
+
+
+	gpio_keys {
+			vol_up {
+			label = "volume_up";
+			gpios = <&msm_gpio 90 0x1>;
+			linux,input-type = <1>;
+			linux,code = <158>;
+			gpio-key,wakeup;
+			debounce-interval = <15>;
+		};
+	};
+};
+
+
+&spmi_bus {
+qcom,pm660@1 {
+		spmi-slave-container;
+		reg = <0x1>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		pm660_haptics: qcom,haptic@c000 {
+			status = "okay";
+			compatible = "qcom,qpnp-haptic";
+			reg = <0xc000 0x100>;
+			interrupts = <0x1 0xc0 0x0 IRQ_TYPE_EDGE_BOTH>,
+				     <0x1 0xc0 0x1 IRQ_TYPE_EDGE_BOTH>;
+			interrupt-names = "sc-irq", "play-irq";
+			qcom,pmic-revid = <&pm660_revid>;
+			qcom,pmic-misc = <&pm660_misc>;
+			qcom,misc-clk-trim-error-reg = <0xf3>;
+			qcom,actuator-type = "erm";
+			qcom,play-mode = "direct";
+			qcom,vmax-mv = <1300>;
+			qcom,ilim-ma = <800>;
+			qcom,wave-shape = "square";
+			qcom,wave-play-rate-us = <6667>;
+			qcom,int-pwm-freq-khz = <505>;
+			qcom,sc-deb-cycles = <8>;
+			qcom,en-brake;
+			qcom,brake-pattern = [03 03 00 00];
+		};
+	};
+};
+
+&msm_gpio {
+	pmx_i2c_6 {
+		i2c_6_active: i2c_6_active {
+			mux {
+				pins = "gpio10", "gpio11";
+				function = "blsp_i2c6";
+			};
+			config {
+				pins = "gpio10", "gpio11";
+				drive-strength = <2>; /* 2 MA */
+				bias-disable; /* No PULL */
+			};
+		};
+		i2c_6_sleep: i2c_6_sleep {
+			mux {
+				pins = "gpio10", "gpio11";
+				function = "blsp_i2c6";
+			};
+			config {
+				pins = "gpio10", "gpio11";
+				drive-strength = <2>; /* 2 MA */
+				bias-disable; /* No PULL */
+			};
+		};
+	};
+};

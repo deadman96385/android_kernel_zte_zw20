@@ -1,0 +1,72 @@
+qcom,zte_zw20_500mah_pmw3100 {
+	qcom, = <24>;
+	/* #ZTE_ZW20_500mAH_PMW3100*/
+	qcom,max-voltage-uv = <4400000>;
+	qcom,fg-cc-cv-threshold-mv = <4390>;
+	qcom,nom-batt-capacity-mah = <445>;
+	qcom,fastchg-current-max-ma = <425>;
+	qcom,fastchg-current-ma = <425>;
+	qcom,batt-id-kohm = <10>;
+	qcom,battery-beta = <3440>;
+	qcom,battery-type = "zte_zw20_500mah_pmw3100";
+	qcom,checksum = <0x85CF>;
+	qcom,gui-version = "PM660GUI - 0.0.0.45";
+	qcom,fg-profile-data = [
+		 25 23 DF 0C
+		 98 12 EC 0D
+		 D7 1C 9B 01
+		 4C 05 15 03
+		 9B 18 C4 1B
+		 FB 3D 03 43
+		 9A 00 00 00
+		 1C 00 00 00
+		 00 00 D0 CD
+		 AD BC 20 C2
+		 30 00 08 00
+		 EE F3 4D FD
+		 DC ED D1 E2
+		 52 0D BB 05
+		 61 0D BD 4A
+		 12 06 09 20
+		 27 00 14 00
+		 57 21 DC 0D
+		 E3 0B EF 04
+		 F1 1C 29 02
+		 98 0D 91 0A
+		 B2 18 F8 22
+		 78 45 FD 52
+		 83 00 00 00
+		 12 00 00 00
+		 00 00 20 CC
+		 E1 BC 1D CB
+		 34 00 00 00
+		 B9 01 4D FD
+		 35 D3 17 E4
+		 92 BC C9 F2
+		 BF F4 DB 12
+		 9C 33 CC FF
+		 07 10 00 00
+		 DB 01 66 46
+		 34 00 40 00
+		 17 04 0A FA
+		 FF 00 00 00
+		 00 00 00 00
+		 00 00 00 00
+		 00 00 00 00
+		 00 00 00 00
+		 00 00 00 00
+		 00 00 00 00
+		 00 00 00 00
+		 00 00 00 00
+		 00 00 00 00
+		 00 00 00 00
+		 00 00 00 00
+		 00 00 00 00
+		 00 00 00 00
+		 00 00 00 00
+		 00 00 00 00
+		 00 00 00 00
+		 00 00 00 00
+		 00 00 00 00
+	];
+};
