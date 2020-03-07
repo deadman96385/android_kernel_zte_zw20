@@ -39,6 +39,10 @@ const char *pm_states[PM_SUSPEND_MAX];
 static const struct platform_suspend_ops *suspend_ops;
 static const struct platform_freeze_ops *freeze_ops;
 static DECLARE_WAIT_QUEUE_HEAD(suspend_freeze_wait_head);
+/* add by ZTE show vdd_min and sleep clk++++ */
+extern void pm_show_rpm_stats(void);
+/* add by ZTE show vdd_min and sleep clk end */
+
 
 enum freeze_state __read_mostly suspend_freeze_state;
 static DEFINE_SPINLOCK(suspend_freeze_lock);
@@ -557,6 +561,9 @@ int pm_suspend(suspend_state_t state)
 		dpm_save_failed_errno(error);
 	} else {
 		suspend_stats.success++;
+		/* add by ZTE show vdd_min and sleep clk++++ */
+		pm_show_rpm_stats();
+		/* add by ZTE show vdd_min and sleep end */
 	}
 	pm_suspend_marker("exit");
 	return error;
