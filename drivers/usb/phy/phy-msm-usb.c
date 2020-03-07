@@ -1800,12 +1800,68 @@ static void msm_otg_set_online_status(struct msm_otg *motg)
 		dev_dbg(motg->phy.dev, "error setting power supply property\n");
 }
 
+/* Usb online lpm test requirement, 2/5 */
+static void msm_otg_set_vbus_state(int online);
+static int forge_usb_offline = 0;
+
+static ssize_t set_usb_online_fn(struct device *dev, struct device_attribute *attr,
+								const char *buf, size_t count)
+{
+	int online;
+
+	if (kstrtoint(buf, 10, &online) < 0)
+		return -EINVAL;
+
+	online = !!online;
+	pr_info("%s, online : %d\n", __func__, online);
+	msm_otg_set_vbus_state(online);
+	forge_usb_offline = !online;
+	return 1;
+}
+
+static DEVICE_ATTR(set_usb_online, S_IWUSR, NULL, set_usb_online_fn);
+
+static struct device_attribute *lpm_test_attributes[] = {
+	&dev_attr_set_usb_online,
+	NULL
+};
+
+static int lpm_test_create_device(struct msm_otg *motg)
+{
+	struct device_attribute **attrs = lpm_test_attributes;
+	struct device_attribute *attr;
+	int err;
+
+	pr_debug("%s\n", __func__);
+	motg->lpm_test_class = class_create(THIS_MODULE, "charger");
+	if (IS_ERR(motg->lpm_test_class))
+		return PTR_ERR(motg->lpm_test_class);
+
+	motg->lpm_test_dev = device_create(motg->lpm_test_class, NULL, 0, NULL, "test");
+	if (IS_ERR(motg->lpm_test_dev))
+		return PTR_ERR(motg->lpm_test_dev);
+
+	dev_set_drvdata(motg->lpm_test_dev, motg);
+
+	while ((attr = *attrs++)) {
+		err = device_create_file(motg->lpm_test_dev, attr);
+		if (err) {
+			device_destroy(motg->lpm_test_class, 0);
+			return err;
+		}
+	}
+	return 0;
+}
+
 static void msm_otg_notify_charger(struct msm_otg *motg, unsigned mA)
 {
 	struct usb_gadget *g = motg->phy.otg->gadget;
 	struct msm_otg_platform_data *pdata = motg->pdata;
 
 	if (g && g->is_a_peripheral)
+		return;
+	/* Usb online lpm test requirement, 3/5 */
+	if (forge_usb_offline)
 		return;
 
 	dev_dbg(motg->phy.dev, "Requested curr from USB = %u, max-type-c:%u\n",
@@ -3574,6 +3630,9 @@ static int otg_power_set_property_usb(struct power_supply *psy,
 		break;
 	/* Process PMIC notification in PRESENT prop */
 	case POWER_SUPPLY_PROP_PRESENT:
+		/* Usb online lpm test requirement, 4/5 */
+		if (forge_usb_offline)
+			forge_usb_offline = 0;
 		msm_otg_set_vbus_state(val->intval);
 		break;
 	/* The ONLINE property reflects if usb has enumerated */
@@ -5031,6 +5090,12 @@ static int msm_otg_probe(struct platform_device *pdev)
 	motg->pm_notify.notifier_call = msm_otg_pm_notify;
 	register_pm_notifier(&motg->pm_notify);
 	msm_otg_dbg_log_event(phy, "OTG PROBE", motg->caps, motg->lpm_flags);
+
+	/* Usb online lpm test requirement, 5/5 */
+	ret = lpm_test_create_device(motg);
+	if (ret) {
+		dev_dbg(&pdev->dev, "fail to setup lpm_test_device\n");
+	}
 
 	return 0;
 

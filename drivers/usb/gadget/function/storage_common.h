@@ -88,6 +88,25 @@ do {									\
 #define ASC(x)		((u8) ((x) >> 8))
 #define ASCQ(x)		((u8) (x))
 
+/* OEM for SCSI Command sent by OS X */
+#define SC_GET_CONFIGRATION      0x46
+#define SC_SET_CD_SPEED          0xbb
+
+/* SUA, for cdrom function switch */
+#define SC_USB_FUNCTION_SWITCH   0x86
+#define CDROM_FUNCTION_SWITCH_REQUEST  0xA5
+#define EXECUTE_CDROM_FUNCTION_SWITCH  0x01
+#define CANCEL_CDROM_FUNCTION_SWITCH  0x02
+/* end */
+/* SUA for at, for cdrom function switch */
+#define SC_CDROM_TO_AT_SWITCH   0x87
+#define CDROM_TO_AT_FUNCTION_SWITCH_REQUEST  0xA6 /*no use*/
+#define EXECUTE_CDROM_TO_AT_SWITCH  0x01
+#define CANCEL_CDROM_TO_AT_SWITCH  0x02
+/* end */
+
+
+
 struct fsg_lun {
 	struct file	*filp;
 	loff_t		file_length;
