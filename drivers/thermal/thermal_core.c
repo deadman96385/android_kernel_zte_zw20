@@ -39,6 +39,9 @@
 #include <linux/kthread.h>
 #include <net/netlink.h>
 #include <net/genetlink.h>
+/* added by zte for battery notify*/
+#include <linux/power_supply.h>
+/* added end*/
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/thermal.h>
@@ -889,6 +892,10 @@ static void handle_thermal_trip(struct thermal_zone_device *tz, int trip)
  *
  * Return: On success returns 0, an error code otherwise
  */
+/* added by zte for battery notify*/
+extern void power_supply_changed(struct power_supply *psy);
+extern struct power_supply *power_supply_get_by_name(const char *name);
+/* added end */
 int thermal_zone_get_temp(struct thermal_zone_device *tz, unsigned long *temp)
 {
 	int ret = -EINVAL;
@@ -897,6 +904,9 @@ int thermal_zone_get_temp(struct thermal_zone_device *tz, unsigned long *temp)
 	unsigned long crit_temp = -1UL;
 	enum thermal_trip_type type;
 #endif
+	/* added by zte for battery notify*/
+	static unsigned long last_temp = 0;
+	/* added end */
 
 	if (!tz || IS_ERR(tz) || !tz->ops->get_temp)
 		goto exit;
@@ -904,6 +914,13 @@ int thermal_zone_get_temp(struct thermal_zone_device *tz, unsigned long *temp)
 	mutex_lock(&tz->lock);
 
 	ret = tz->ops->get_temp(tz, temp);
+	/* added by zte for battery notify*/
+	if (!strcmp(tz->type, "quiet_therm") && (*temp != last_temp)) {
+		pr_info("sensor is %s, temp is %ld, lasttemp is %ld\n", tz->type, *temp, last_temp);
+		power_supply_changed(power_supply_get_by_name("battery"));
+		last_temp = *temp;
+	}
+	/* added end */
 #ifdef CONFIG_THERMAL_EMULATION
 	if (!tz->emul_temperature)
 		goto skip_emul;
