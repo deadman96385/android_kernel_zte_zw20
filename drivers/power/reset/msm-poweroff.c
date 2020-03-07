@@ -25,6 +25,8 @@
 #include <linux/delay.h>
 #include <linux/qpnp/power-on.h>
 #include <linux/of_address.h>
+/* Use Qualcomm's usb vid and pid if enters download due to panic. */
+#include <linux/qcom/diag_dload.h>
 
 #include <asm/cacheflush.h>
 #include <asm/system_misc.h>
@@ -55,7 +57,7 @@ static void __iomem *msm_ps_hold;
 static phys_addr_t tcsr_boot_misc_detect;
 static void scm_disable_sdi(void);
 
-#ifdef CONFIG_MSM_DLOAD_MODE
+#if defined(CONFIG_MSM_DLOAD_MODE) && !defined(ZTE_FEATURE_TF_SECURITY_SYSTEM)
 /* Runtime could be only changed value once.
 * There is no API from TZ to re-enable the registers.
 * So the SDI cannot be re-enabled when it already by-passed.
@@ -274,16 +276,25 @@ static void msm_restart_prepare(const char *cmd)
 	 * Write download mode flags if restart_mode says so
 	 * Kill download mode if master-kill switch is set
 	 */
-
+	#if 0
 	set_dload_mode(download_mode &&
 			(in_panic || restart_mode == RESTART_DLOAD));
+	#else
+		if (restart_mode == RESTART_DLOAD)
+		set_dload_mode(1);
+		else if (download_mode)
+		set_dload_mode(in_panic);
+		else
+		set_dload_mode(0);
+	#endif
+
 #endif
 
 	if (qpnp_pon_check_hard_reset_stored()) {
 		/* Set warm reset as true when device is in dload mode */
 		if (get_dload_mode() ||
 			((cmd != NULL && cmd[0] != '\0') &&
-			!strcmp(cmd, "edl")))
+			(!strcmp(cmd, "edl") || !strcmp(cmd, "zte"))))
 			need_warm_reset = true;
 	} else {
 		need_warm_reset = (get_dload_mode() ||
@@ -293,6 +304,11 @@ static void msm_restart_prepare(const char *cmd)
 
 	/* Hard reset the PMIC unless memory contents must be maintained. */
 	if (need_warm_reset) {
+#if defined(CONFIG_MSM_DLOAD_MODE) && !defined(ZTE_FEATURE_TF_SECURITY_SYSTEM)
+	/* zte add reset type print to assist reset issue's analysis */
+		pr_notice("zte_restart flag %d, %d, %d\n",
+			in_panic, download_mode, restart_mode);
+#endif
 		qpnp_pon_system_pwr_off(PON_POWER_OFF_WARM_RESET);
 	} else {
 		qpnp_pon_system_pwr_off(PON_POWER_OFF_HARD_RESET);
@@ -323,6 +339,17 @@ static void msm_restart_prepare(const char *cmd)
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_KEYS_CLEAR);
 			__raw_writel(0x7766550a, restart_reason);
+		} else if (!strncmp(cmd, "ftmmode", 7)) {
+			/*ZTE_BOOT support:adb reboot ftmmode*/
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_FTMMODE);
+			__raw_writel(0x776655ee, restart_reason);
+#if defined(CONFIG_ZTE_PIL_AUTH_ERROR_DETECTION) || defined(VZW)
+		} else if (!strncmp(cmd, "unauth", 6)) {
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_PIL_UNAUTH);
+			__raw_writel(0x776655cc, restart_reason);
+#endif
 		} else if (!strncmp(cmd, "oem-", 4)) {
 			unsigned long code;
 			int ret;
@@ -332,6 +359,21 @@ static void msm_restart_prepare(const char *cmd)
 					     restart_reason);
 		} else if (!strncmp(cmd, "edl", 3)) {
 			enable_emergency_dload_mode();
+		} else if (!strncmp(cmd, "disemmcwp", 9)) {
+			/*Add interface to enable/disable emmc write protct function */
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_DISEMMCWP);
+			__raw_writel(0x776655aa, restart_reason);
+		} else if (!strncmp(cmd, "emmcwpenab", 10)) {
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_EMMCWPENAB);
+			__raw_writel(0x776655bb, restart_reason);
+#ifdef CONFIG_ZTE_PIL_AUTH_ERROR_DETECTION
+		} else if (!strncmp(cmd, "unauth", 6)) {
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_PIL_UNAUTH);
+			__raw_writel(0x776655cc, restart_reason);
+#endif
 		} else {
 			__raw_writel(0x77665501, restart_reason);
 		}
@@ -376,7 +418,7 @@ static void do_msm_restart(enum reboot_mode reboot_mode, const char *cmd)
 
 	msm_restart_prepare(cmd);
 
-#ifdef CONFIG_MSM_DLOAD_MODE
+#if defined(CONFIG_MSM_DLOAD_MODE) && !defined(ZTE_FEATURE_TF_SECURITY_SYSTEM)
 	/*
 	 * Trigger a watchdog bite here and if this fails,
 	 * device will take the usual restart path.
@@ -409,7 +451,7 @@ static void do_msm_poweroff(void)
 	return;
 }
 
-#ifdef CONFIG_MSM_DLOAD_MODE
+#if defined(CONFIG_MSM_DLOAD_MODE) && !defined(ZTE_FEATURE_TF_SECURITY_SYSTEM)
 static ssize_t attr_show(struct kobject *kobj, struct attribute *attr,
 				char *buf)
 {
@@ -496,7 +538,7 @@ static int msm_restart_probe(struct platform_device *pdev)
 	struct device_node *np;
 	int ret = 0;
 
-#ifdef CONFIG_MSM_DLOAD_MODE
+#if defined(CONFIG_MSM_DLOAD_MODE) && !defined(ZTE_FEATURE_TF_SECURITY_SYSTEM)
 	if (scm_is_call_available(SCM_SVC_BOOT, SCM_DLOAD_CMD) > 0)
 		scm_dload_supported = true;
 

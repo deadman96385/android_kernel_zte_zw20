@@ -251,6 +251,8 @@ struct fg_dt_props {
 	int	delta_soc_thr;
 	int	recharge_soc_thr;
 	int	recharge_volt_thr_mv;
+	int	recharge_volt_cool_mv;
+	int	recharge_volt_warm_mv;
 	int	rsense_sel;
 	int	esr_timer_charging[NUM_ESR_TIMERS];
 	int	esr_timer_awake[NUM_ESR_TIMERS];

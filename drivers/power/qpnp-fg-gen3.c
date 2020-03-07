@@ -385,7 +385,8 @@ static struct fg_alg_flag pmi8998_v2_alg_flags[] = {
 	},
 };
 
-static int fg_gen3_debug_mask;
+static int fg_gen3_debug_mask = FG_IRQ | FG_STATUS | FG_POWER_SUPPLY
+							| FG_CAP_LEARN | FG_TTF;
 module_param_named(
 	debug_mask, fg_gen3_debug_mask, int, S_IRUSR | S_IWUSR
 );
@@ -829,12 +830,12 @@ static int fg_get_prop_capacity(struct fg_chip *chip, int *val)
 		*val = EMPTY_SOC;
 		return 0;
 	}
-
+/* if is health is warm, battery can not charge to full
 	if (chip->charge_full) {
 		*val = FULL_CAPACITY;
 		return 0;
 	}
-
+*/
 	rc = fg_get_msoc(chip, &msoc);
 	if (rc < 0)
 		return rc;
@@ -843,6 +844,8 @@ static int fg_get_prop_capacity(struct fg_chip *chip, int *val)
 		*val = chip->maint_soc;
 	else
 		*val = msoc;
+	fg_dbg(chip, FG_STATUS, "charge_status: %d, soc val: %d, delta_soc: %d\n",
+			chip->charge_status, *val, chip->delta_soc);
 	return 0;
 }
 
@@ -1627,12 +1630,21 @@ static int fg_set_recharge_voltage(struct fg_chip *chip, int voltage_mv)
 	return 0;
 }
 
+enum {
+	BATT_NOT_FULL,
+	BATT_FULL_1st,
+	BATT_FULL_2nd,
+};
+
 #define AUTO_RECHG_VOLT_LOW_LIMIT_MV	3700
 static int fg_charge_full_update(struct fg_chip *chip)
 {
 	union power_supply_propval prop = {0, };
 	int rc, msoc, bsoc, recharge_soc;
 	u8 full_soc[2] = {0xFF, 0xFF};
+	int recharge_vol = chip->dt.recharge_volt_thr_mv;
+	int vbatt_uv = 0;
+	static int batt_full_status = BATT_NOT_FULL;
 
 	if (!chip->dt.hold_soc_while_full)
 		return 0;
@@ -1671,6 +1683,18 @@ static int fg_charge_full_update(struct fg_chip *chip)
 	fg_dbg(chip, FG_STATUS, "msoc: %d bsoc: %x health: %d status: %d full: %d\n",
 		msoc, bsoc, chip->health, chip->charge_status,
 		chip->charge_full);
+
+	fg_get_battery_voltage(chip, &vbatt_uv);
+
+	if (chip->health == POWER_SUPPLY_HEALTH_GOOD)
+		recharge_vol = chip->dt.recharge_volt_thr_mv;
+	else if (chip->health == POWER_SUPPLY_HEALTH_COOL)
+		recharge_vol = chip->dt.recharge_volt_cool_mv;
+	else if (chip->health == POWER_SUPPLY_HEALTH_WARM)
+		recharge_vol = chip->dt.recharge_volt_warm_mv;
+	else
+		recharge_vol = chip->dt.recharge_volt_warm_mv;
+
 	if (chip->charge_done && !chip->charge_full) {
 		if (msoc >= 99 && chip->health == POWER_SUPPLY_HEALTH_GOOD) {
 			fg_dbg(chip, FG_STATUS, "Setting charge_full to true\n");
@@ -1679,17 +1703,33 @@ static int fg_charge_full_update(struct fg_chip *chip)
 			 * Lower the recharge voltage so that VBAT_LT_RECHG
 			 * signal will not be asserted soon.
 			 */
+			/* temperary modify
 			rc = fg_set_recharge_voltage(chip,
 					AUTO_RECHG_VOLT_LOW_LIMIT_MV);
 			if (rc < 0) {
 				pr_err("Error in reducing recharge voltage, rc=%d\n",
 					rc);
 				goto out;
-			}
-		} else {
-			fg_dbg(chip, FG_STATUS, "Terminated charging @ SOC%d\n",
-				msoc);
+			}*/
+			rc = fg_set_recharge_voltage(chip, recharge_vol);
+				if (rc < 0)
+					pr_err("Error in setting recharge voltage, rc=%d\n", rc);
+		} else if (batt_full_status == BATT_NOT_FULL) {
+			batt_full_status = BATT_FULL_1st;
+
+			rc = fg_set_recharge_voltage(chip, recharge_vol);
+			if (rc < 0)
+				pr_err("Error in setting recharge voltage, rc=%d\n", rc);
+			else
+				fg_dbg(chip, FG_STATUS, "batt health %d, set recharge vol %d\n",
+						chip->health, recharge_vol);
+
+			fg_dbg(chip, FG_STATUS, "Terminated charging @ SOC%d\n", msoc);
 		}
+	} else if (vbatt_uv / 1000 <= recharge_vol && chip->charge_full) {
+			chip->charge_full = false;
+			batt_full_status = BATT_NOT_FULL;
+			fg_dbg(chip, FG_STATUS, "vbatt_uv: %d recharge_vol: %d\n", vbatt_uv, recharge_vol);
 	} else if ((bsoc >> 8) <= recharge_soc && chip->charge_full) {
 		chip->delta_soc = FULL_CAPACITY - msoc;
 
@@ -3389,6 +3429,7 @@ static enum power_supply_property fg_psy_props[] = {
 #define DEFAULT_ESR_CHG_TIMER_RETRY	8
 #define DEFAULT_ESR_CHG_TIMER_MAX	16
 #define VOLTAGE_MODE_SAT_CLEAR_BIT	BIT(3)
+#define FG_SRAM_CUTOFF_IBATT_ADDR	4
 static int fg_hw_init(struct fg_chip *chip)
 {
 	int rc;
@@ -3400,6 +3441,17 @@ static int fg_hw_init(struct fg_chip *chip)
 			chip->sp[FG_SRAM_CUTOFF_VOLT].len, FG_IMA_DEFAULT);
 	if (rc < 0) {
 		pr_err("Error in writing cutoff_volt, rc=%d\n", rc);
+		return rc;
+	}
+
+	/* config ibat_cutoff to slow down soc drop at low temp
+		default val is 0.5A, set to 0.1A(0x333)
+	*/
+	buf[0] = 0x33;
+	buf[1] = 0x3;
+	rc = fg_sram_write(chip, FG_SRAM_CUTOFF_IBATT_ADDR, 0, buf, 2, FG_IMA_DEFAULT);
+	if (rc < 0) {
+		pr_err("Error in writing cutoff_ibatt, rc=%d\n", rc);
 		return rc;
 	}
 
@@ -4236,7 +4288,7 @@ static int fg_parse_dt(struct fg_chip *chip)
 		return -EPROBE_DEFER;
 	}
 
-	pr_debug("PMIC subtype %d Digital major %d\n",
+	pr_info("PMIC subtype %d Digital major %d\n",
 		chip->pmic_rev_id->pmic_subtype, chip->pmic_rev_id->rev4);
 
 	switch (chip->pmic_rev_id->pmic_subtype) {
@@ -4361,6 +4413,22 @@ static int fg_parse_dt(struct fg_chip *chip)
 		chip->dt.recharge_volt_thr_mv = DEFAULT_RECHARGE_VOLT_MV;
 	else
 		chip->dt.recharge_volt_thr_mv = temp;
+
+	rc = of_property_read_u32(node, "qcom,fg-cool-recharge-voltage", &temp);
+	if (rc < 0)
+		chip->dt.recharge_volt_cool_mv = DEFAULT_RECHARGE_VOLT_MV;
+	else
+		chip->dt.recharge_volt_cool_mv = temp;
+
+	rc = of_property_read_u32(node, "qcom,fg-warm-recharge-voltage", &temp);
+	if (rc < 0)
+		chip->dt.recharge_volt_warm_mv = DEFAULT_RECHARGE_VOLT_MV;
+	else
+		chip->dt.recharge_volt_warm_mv = temp;
+
+	pr_debug("recharge: %d, cool recharge %d, warm recharge %d\n",
+			chip->dt.recharge_volt_thr_mv, chip->dt.recharge_volt_cool_mv,
+			chip->dt.recharge_volt_warm_mv);
 
 	chip->dt.auto_recharge_soc = of_property_read_bool(node,
 					"qcom,fg-auto-recharge-soc");

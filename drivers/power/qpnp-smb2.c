@@ -157,6 +157,7 @@ static struct smb_params pm660_params = {
 struct smb_dt_props {
 	int	usb_icl_ua;
 	int	dc_icl_ua;
+	int chg_term_ma;
 	int	boost_threshold_ua;
 	int	wipower_max_uw;
 	int	min_freq_khz;
@@ -177,7 +178,7 @@ struct smb2 {
 	bool			bad_part;
 };
 
-static int __debug_mask;
+static int __debug_mask = 0xFF;
 module_param_named(
 	debug_mask, __debug_mask, int, S_IRUSR | S_IWUSR
 );
@@ -189,6 +190,8 @@ module_param_named(
 #define MICRO_1P5A		1500000
 #define MICRO_P1A		100000
 #define OTG_DEFAULT_DEGLITCH_TIME_MS	50
+#define DEFAULT_FVCOMP 40
+#define DEFAULT_CHARGE_CURRENT_COMP 12
 static int smb2_parse_dt(struct smb2 *chip)
 {
 	struct smb_charger *chg = &chip->chg;
@@ -199,6 +202,12 @@ static int smb2_parse_dt(struct smb2 *chip)
 		pr_err("device tree node missing\n");
 		return -EINVAL;
 	}
+
+	chg->step_chg_enabled = of_property_read_bool(node,
+				"qcom,step-charging-enable");
+
+	chg->sw_jeita_enabled = of_property_read_bool(node,
+				"qcom,sw-jeita-enable");
 
 	chip->dt.no_battery = of_property_read_bool(node,
 						"qcom,batteryless-platform");
@@ -223,6 +232,11 @@ static int smb2_parse_dt(struct smb2 *chip)
 				"qcom,usb-icl-ua", &chip->dt.usb_icl_ua);
 	if (rc < 0)
 		chip->dt.usb_icl_ua = -EINVAL;
+
+	rc = of_property_read_u32(node,
+				"qcom,chg-term-ma", &chip->dt.chg_term_ma);
+	if (rc < 0)
+		chip->dt.chg_term_ma = -EINVAL;
 
 	rc = of_property_read_u32(node,
 				"qcom,otg-cl-ua", &chg->otg_cl_ua);
@@ -284,6 +298,7 @@ static int smb2_parse_dt(struct smb2 *chip)
 
 	chip->dt.hvdcp_disable = of_property_read_bool(node,
 						"qcom,hvdcp-disable");
+	chg->hvdcp_forbid = chip->dt.hvdcp_disable;
 
 	of_property_read_u32(node, "qcom,chg-inhibit-threshold-mv",
 				&chip->dt.chg_inhibit_thr_mv);
@@ -307,6 +322,24 @@ static int smb2_parse_dt(struct smb2 *chip)
 					&chg->otg_delay_ms);
 	if (rc < 0)
 		chg->otg_delay_ms = OTG_DEFAULT_DEGLITCH_TIME_MS;
+
+	rc = of_property_read_u32(node, "qcom,charge-current-comp",
+					&chg->charge_current_comp);
+	if (rc < 0)
+		chg->charge_current_comp = DEFAULT_CHARGE_CURRENT_COMP;
+	pr_info("charge_current_comp=%d\n", chg->charge_current_comp);
+
+	rc = of_property_read_u32(node, "qcom,float-voltage-comp-warm",
+					&chg->float_voltage_comp_warm);
+	if (rc < 0)
+		chg->float_voltage_comp_warm = DEFAULT_FVCOMP;
+	pr_info("float_voltage_comp_warm=%d\n", chg->float_voltage_comp_warm);
+
+	rc = of_property_read_u32(node, "qcom,float-voltage-comp-cool",
+					&chg->float_voltage_comp_cool);
+	if (rc < 0)
+		chg->float_voltage_comp_cool = DEFAULT_FVCOMP;
+	pr_info("float_voltage_comp_cool=%d\n", chg->float_voltage_comp_cool);
 
 	return 0;
 }
@@ -333,7 +366,7 @@ static void smb2_external_power_supply_changed(struct power_supply *psy)
 			pr_err("Couldn't vote %duA on USB_ICL rc=%d\n",
 				prop.intval, rc);
 		else
-			pr_debug("usb-psy vote %duA\n", prop.intval);
+			pr_info("usb-psy vote %duA\n", prop.intval);
 	}
 }
 
@@ -560,6 +593,8 @@ static enum power_supply_property smb2_batt_props[] = {
 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
 	POWER_SUPPLY_PROP_TEMP,
 	POWER_SUPPLY_PROP_TECHNOLOGY,
+	POWER_SUPPLY_PROP_STEP_CHARGING_ENABLED,
+	POWER_SUPPLY_PROP_SW_JEITA_ENABLED,
 	POWER_SUPPLY_PROP_CHARGE_DONE,
 	POWER_SUPPLY_PROP_PARALLEL_DISABLE,
 	POWER_SUPPLY_PROP_SET_SHIP_MODE,
@@ -567,6 +602,10 @@ static enum power_supply_property smb2_batt_props[] = {
 	POWER_SUPPLY_PROP_RERUN_AICL,
 	POWER_SUPPLY_PROP_DP_DM,
 	POWER_SUPPLY_PROP_CHARGE_COUNTER,
+	POWER_SUPPLY_PROP_BATTERY_HEALTH,
+	POWER_SUPPLY_PROP_BATTERY_CYCLE,
+	POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLED,
+	POWER_SUPPLY_PROP_CHARGING_ENABLED,
 };
 
 static int smb2_batt_get_prop(struct power_supply *psy,
@@ -615,6 +654,12 @@ static int smb2_batt_get_prop(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMITED:
 		rc = smblib_get_prop_input_current_limited(chg, val);
+		break;
+	case POWER_SUPPLY_PROP_STEP_CHARGING_ENABLED:
+		val->intval = chg->step_chg_enabled;
+		break;
+	case POWER_SUPPLY_PROP_SW_JEITA_ENABLED:
+		val->intval = chg->sw_jeita_enabled;
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
 		rc = smblib_get_prop_batt_voltage_now(chg, val);
@@ -673,6 +718,29 @@ static int smb2_batt_get_prop(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
 		rc = smblib_get_prop_batt_charge_counter(chg, val);
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_HEALTH:
+		rc = smblib_get_prop_batt_health(chg, val);
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_CYCLE:
+		rc = smblib_get_prop_battery_cycle(chg, val);
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLED:
+		val->intval
+			= get_effective_result(chg->chg_disable_votable);
+		if (val->intval < 0) /* no votes */
+			val->intval = 1;
+		else
+			val->intval = !val->intval;
+		break;
+	case POWER_SUPPLY_PROP_CHARGING_ENABLED:
+		val->intval
+		= (get_client_vote(chg->usb_icl_votable, USER_VOTER) == 0)
+		 && get_client_vote(chg->dc_suspend_votable, USER_VOTER);
+		if (val->intval < 0) /* no votes */
+			val->intval = 1;
+		else
+			val->intval = !val->intval;
 		break;
 	default:
 		pr_err("batt power supply prop %d not supported\n", psp);
@@ -737,6 +805,16 @@ static int smb2_batt_set_prop(struct power_supply *psy,
 			vote(chg->fcc_votable, BATT_PROFILE_VOTER, false, 0);
 		}
 		break;
+	case POWER_SUPPLY_PROP_STEP_CHARGING_ENABLED:
+		chg->step_chg_enabled = !!val->intval;
+		break;
+	case POWER_SUPPLY_PROP_SW_JEITA_ENABLED:
+		if (chg->sw_jeita_enabled != (!!val->intval)) {
+			rc = smblib_disable_hw_jeita(chg, !!val->intval);
+			if (rc == 0)
+				chg->sw_jeita_enabled = !!val->intval;
+		}
+		break;
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
 		chg->batt_profile_fcc_ua = val->intval;
 		vote(chg->fcc_votable, BATT_PROFILE_VOTER, true, val->intval);
@@ -765,6 +843,15 @@ static int smb2_batt_set_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMITED:
 		rc = smblib_set_prop_input_current_limited(chg, val);
 		break;
+	case POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLED:
+		vote(chg->chg_disable_votable, BATTCHG_USER_EN_VOTER,
+				!val->intval, 0);
+		break;
+	case POWER_SUPPLY_PROP_CHARGING_ENABLED:
+		vote(chg->usb_icl_votable, USER_VOTER, (bool)!val->intval, 0);
+		vote(chg->dc_suspend_votable, USER_VOTER, (bool)!val->intval, 0);
+		power_supply_changed(&chg->batt_psy);
+		break;
 	default:
 		rc = -EINVAL;
 	}
@@ -783,6 +870,10 @@ static int smb2_batt_prop_is_writeable(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_DP_DM:
 	case POWER_SUPPLY_PROP_RERUN_AICL:
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMITED:
+	case POWER_SUPPLY_PROP_STEP_CHARGING_ENABLED:
+	case POWER_SUPPLY_PROP_SW_JEITA_ENABLED:
+	case POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLED:
+	case POWER_SUPPLY_PROP_CHARGING_ENABLED:
 		return 1;
 	default:
 		break;
@@ -1110,6 +1201,9 @@ static int smb2_init_hw(struct smb2 *chip)
 		chg->param.freq_boost.max_u = chip->dt.max_freq_khz;
 	}
 
+	if (chip->dt.chg_term_ma > 0)
+		smblib_set_chg_term_current(chg, chip->dt.chg_term_ma);
+
 	/* set a slower soft start setting for OTG */
 	rc = smblib_masked_write(chg, DC_ENG_SSUPPLY_CFG2_REG,
 				ENG_SSUPPLY_IVREF_OTG_SS_MASK, OTG_SS_SLOW);
@@ -1171,6 +1265,14 @@ static int smb2_init_hw(struct smb2 *chip)
 			chg->micro_usb_mode, 0);
 	vote(chg->pd_disallowed_votable_indirect, PD_NOT_SUPPORTED_VOTER,
 			chip->dt.no_pd, 0);
+
+	rc = smblib_masked_write(chg, USBIN_OPTIONS_1_CFG_REG,
+					 HVDCP_EN_BIT, !chg->hvdcp_forbid);
+	if (rc < 0) {
+		pr_err("Couldn't %s hvdcp rc=%d\n",
+			chg->hvdcp_forbid ? "disable" : "enable", rc);
+		return rc;
+	}
 
 	/*
 	 * AICL configuration:
@@ -1346,6 +1448,16 @@ static int smb2_init_hw(struct smb2 *chip)
 		}
 	}
 
+	if (chg->sw_jeita_enabled) {
+		rc = smblib_disable_hw_jeita(chg, true);
+		if (rc < 0) {
+			dev_err(chg->dev, "Couldn't set hw jeita rc=%d\n", rc);
+			return rc;
+		}
+	}
+
+	smblib_charge_current_comp_set(chg, chg->charge_current_comp);
+	smblib_float_voltage_comp_set(chg, chg->float_voltage_comp_warm);
 	return rc;
 }
 
@@ -1639,9 +1751,10 @@ static struct smb_irq_info smb2_irqs[] = {
 		.handler	= smblib_handle_debug,
 		.flags		= IRQ_TYPE_EDGE_BOTH,
 	},
+	/* aicl done irq will trigger interrupt storm and useless, so disable it */
 	[AICL_DONE_IRQ] = {
 		.name		= "aicl-done",
-		.handler	= smblib_handle_debug,
+		.handler	= NULL,/*smblib_handle_debug,*/
 		.flags		= IRQ_TYPE_EDGE_BOTH,
 	},
 	[HIGH_DUTY_CYCLE_IRQ] = {
