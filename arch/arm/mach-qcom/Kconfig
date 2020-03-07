@@ -27,3 +27,12 @@ config QCOM_SCM
 	bool
 
 endif
+
+
+
+config ZTE_PIL_AUTH_ERROR_DETECTION
+	bool "ZTE PIL AUTH ERROR DETECTION"
+	default n
+	help
+	  When authorization of PIL images is failed, the system
+	  will enter into UNAUTH mode to show related error message.

@@ -343,6 +343,15 @@ config ARCH_MSM8909
 	select DEVFREQ_GOV_MSM_BW_HWMON
 	select MSM_BIMC_BWMON
 	select ARCH_WANT_KMAP_ATOMIC_FLUSH
+	select ZTE_BOOT_MODE
+endmenu
 
+config ZTE_BOOT_MODE
+    depends on ARCH_MSM8909
+    bool "ZTE BOOT MODE"
+    default y
+    help
+      Support for boot mode
+menu "MSM Board Selection"
 endmenu
 endif
